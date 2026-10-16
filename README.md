@@ -6,6 +6,8 @@
 
 ## 安装与启动
 
+公开仓库：[samchen2009/studytrail](https://github.com/samchen2009/studytrail)。
+
 1. 安装 Node.js **24 LTS**（也支持 Node.js 22.13 及以上版本），其中已包含 npm。
 2. 从 GitHub 下载项目 ZIP 并解压，或克隆仓库。
 3. 在项目目录打开终端，运行：
@@ -17,7 +19,7 @@ npm start
 
 macOS / Linux 可使用系统终端；Windows 可使用 PowerShell、命令提示符或 Windows Terminal。上述命令在三种系统中相同。首次安装依赖需要网络；安装后本地成绩、附件及 PDF 预览无需外部服务。
 
-浏览器打开 **http://127.0.0.1:8767/**。保持终端运行，按 `Ctrl+C` 停止服务；下次仍在同一目录运行 `npm start` 即可。不要直接双击 `web/index.html`。
+浏览器打开 [http://127.0.0.1:8767/](http://127.0.0.1:8767/)。保持终端运行，按 `Ctrl+C` 停止服务；下次仍在同一目录运行 `npm start` 即可。不要直接双击 `web/index.html`。
 
 第一次打开会提示填写**跟踪对象姓名或昵称、当前年级、学校（选填）**。保存后建立空档案，即可录入考试，也可从已有 JSON 备份恢复。以后可以点击侧栏“对象设置”修改信息。
 
