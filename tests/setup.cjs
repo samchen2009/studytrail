@@ -1,0 +1,50 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto');
+const {prepareDataDirectory}=require('../scripts/data-directory.cjs');
+const {options}=require('../scripts/options.cjs'),{localInstance}=require('../api/instance'),C=require('../web/core');
+async function run(){
+ assert.equal(options([],{}).dataDir,path.resolve(__dirname,'../.data'));
+ assert.equal(options([] ,{}).port,8767);assert.equal(options(['--port','8778','--data-dir','./a folder'],{}).dataDir,path.resolve('a folder'));
+ assert.equal(options(['--port=8779'],{PORT:'1111'}).port,8779);assert.equal(options([],{PORT:'8888'}).port,8888);
+ for(const port of ['0','65536','abc','1.5'])assert.throws(()=>options(['--port',port],{}),/端口/);
+ assert.throws(()=>options(['--unknown'],{}));
+ const blank={version:1,student:'测试昵称',profile:{grade:'高二',school:'测试学校'},exams:[],targets:Object.fromEntries(C.subjects.map(s=>[s,60]))};
+ C.validateData(blank);C.validateData({...blank,profile:undefined});
+ for(const invalid of [{...blank,student:' '},{...blank,profile:{grade:'初一',school:''}},{...blank,profile:{grade:'高一',school:17}}])assert.throws(()=>C.validateData(invalid));
+ const folder=await fs.mkdtemp(path.join(os.tmpdir(),'studytrail-setup-'));let server;
+ try{
+  const migrationRoot=path.join(folder,'migration');
+  const oldDir=path.join(migrationRoot,'data'),newDir=path.join(migrationRoot,'.data');
+  assert.equal(await prepareDataDirectory(newDir,migrationRoot),false,'new install has no legacy dataset');
+  await fs.mkdir(path.join(oldDir,'attachments','fixture'),{recursive:true});
+  const bytes=Buffer.from('synthetic attachment bytes');
+  await fs.writeFile(path.join(oldDir,'attachments','fixture','file.bin'),bytes);
+  await fs.writeFile(path.join(oldDir,'000000000001.json'),JSON.stringify(blank));
+  assert.equal(await prepareDataDirectory(path.join(migrationRoot,'custom'),migrationRoot),false,'explicit custom directory leaves old data intact');
+  assert.equal(await prepareDataDirectory(newDir,migrationRoot),true);
+  assert.deepEqual(await fs.readFile(path.join(newDir,'attachments','fixture','file.bin')),bytes);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(newDir,'000000000001.json'),'utf8')),blank);
+  await assert.rejects(fs.stat(oldDir),{code:'ENOENT'});
+  assert.equal(await prepareDataDirectory(newDir,migrationRoot),false,'migration is idempotent');
+  await fs.mkdir(oldDir);await fs.writeFile(path.join(oldDir,'another-record.json'),'{}');
+  await assert.rejects(prepareDataDirectory(newDir,migrationRoot),/同时发现/);
+  assert.deepEqual(await fs.readFile(path.join(newDir,'attachments','fixture','file.bin')),bytes,'conflict preserves destination');
+  assert.equal(await fs.readFile(path.join(oldDir,'another-record.json'),'utf8'),'{}','conflict preserves legacy data');
+  const instances=await Promise.all([localInstance(folder,false),localInstance(folder,false)]);assert.deepEqual(instances[0],instances[1]);assert.equal(instances[0].migrateLegacyDraft,false);
+  assert.deepEqual(await localInstance(folder,true),instances[0],'instance persists across restart');
+  const legacy=await localInstance(path.join(folder,'legacy'),true);assert.equal(legacy.migrateLegacyDraft,true);assert.notEqual(legacy.id,instances[0].id);
+  process.env.LOCAL_JSON_DEMO='1';process.env.TRIAL_PORT='0';process.env.TRIAL_DATA_DIR=folder;
+  server=await require('../api/server').start();const base='http://127.0.0.1:'+server.address().port;
+  const get=async()=>{const response=await fetch(base+'/api/grades');assert.equal(response.status,200);return response.json();};
+  const initial=await get();assert.equal(initial.revision,0);assert.equal(initial.data,null);assert.equal(initial.instanceId,instances[0].id);
+  for(const file of ['/','/seed.js','/profile.js','/learning.js','/ranking.js','/vendor/pdfjs/build/pdf.mjs'])assert.equal((await fetch(base+file)).status,200,file);
+  for(const file of ['/.data/instance.json','/.data/000000000001.json','/data/instance.json','/.git/config','/../data/instance.json','/.env'])assert.equal((await fetch(base+file)).status,404,file);
+  const post=async(data,baseRevision)=>fetch(base+'/api/grades',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseRevision,requestId:crypto.randomUUID(),data})});
+  assert.equal((await post(blank,0)).status,200);assert.deepEqual((await get()).data,blank);
+  const bad={...blank,profile:{grade:'无效',school:''}};assert.equal((await post(bad,1)).status,422);
+  await new Promise(resolve=>server.close(resolve));server=null;
+  server=await require('../api/server').start();const restored=await (await fetch('http://127.0.0.1:'+server.address().port+'/api/grades')).json();assert.deepEqual(restored.data,blank);assert.equal(restored.instanceId,initial.instanceId);
+  console.log('PASS: cross-platform options, first profile save, validation, restart persistence, instance isolation, migration eligibility and private-file HTTP exclusion.');
+ }finally{if(server)await new Promise(resolve=>server.close(resolve));await fs.rm(folder,{recursive:true,force:true});}
+}
+run().catch(error=>{console.error(error);process.exitCode=1;});

@@ -1,0 +1,22 @@
+node_modules/
+/.data/
+/data/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+work/
+outputs/
+
+# Local reports, exam material, generated documents and backups
+output/
+tmp/
+backups/
+*.zip
+*.tar
+*.tar.gz
+*.pdf
+*.xlsx
+*.docx

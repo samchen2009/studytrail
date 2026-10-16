@@ -1,0 +1,1 @@
+{"name":"studytrail-api","version":"0.1.0","private":true,"main":"server.js","scripts":{"start":"node server.js"},"dependencies":{"@cloudbase/js-sdk":"3.10.2","@cloudbase/signature-nodejs":"2.0.0"}}

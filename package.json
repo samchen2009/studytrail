@@ -1,0 +1,21 @@
+{
+  "name": "studytrail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "学迹 StudyTrail：本地优先的高中成绩跟踪、考试复盘与学习档案",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.cjs",
+    "start": "node scripts/dev.cjs",
+    "test": "node check.cjs && node tests/attachments.cjs && node tests/learning.cjs && node tests/ranking.cjs && node tests/setup.cjs && node tests/privacy.cjs",
+    "cloud:install": "npm ci --prefix api --ignore-scripts",
+    "cloud:start": "node api/server.js",
+    "privacy:check": "node scripts/privacy-check.cjs",
+    "prepublishOnly": "npm run privacy:check"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.4.299"
+  }
+}

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Git for Windows runs hooks through its bundled shell.
+node scripts/privacy-check.cjs
