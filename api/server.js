@@ -71,20 +71,36 @@ async function start(){
  if(demo)origins.push('http://127.0.0.1:'+port,'http://localhost:'+port);
  const instance=demo?await require('./instance').localInstance(store.directory,Boolean(await store.latest())):null;
  const service=createService({store,demo,origins,instance,editorHash:process.env.EDITOR_PASSWORD_SHA256||''});
- const attachments=demo?createAttachmentService({store:new AttachmentStore(path.join(store.directory,'attachments')),grades:store,origins:['http://127.0.0.1:'+port,'http://localhost:'+port]}):null;
+ const attachmentStore=demo?new AttachmentStore(path.join(store.directory,'attachments')):null;
+ const attachments=demo?createAttachmentService({store:attachmentStore,grades:store,origins:['http://127.0.0.1:'+port,'http://localhost:'+port]}):null;
+ const gradingStore=demo?new (require('./grading').GradingStore)(path.join(store.directory,'grading')):null;
+ const mistakeStore=demo?new (require('./mistakes').MistakeStore)(path.join(store.directory,'mistakes'),{grading:gradingStore,attachments:attachmentStore,grades:store,instanceId:instance.id}):null;
+ if(mistakeStore){await mistakeStore.init();try{await mistakeStore.reconcile();}catch(error){console.error('MISTAKE_RECONCILE_FAILURE',error.code||'OTHER');}gradingStore.onSaved=value=>mistakeStore.syncJob(value);}
+ const mistakes=demo?require('./mistakes').createMistakeService({store:mistakeStore,origins}):null;
+ const grading=demo?require('./grading').createGradingService({store:gradingStore,origins}):null;
  const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost');
   if(url.pathname.endsWith('/api/health')&&req.method==='GET'){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({service:'studytrail',credentialAvailable:Boolean(process.env.CLOUDBASE_APIKEY||(process.env.TENCENTCLOUD_SECRETID&&process.env.TENCENTCLOUD_SECRETKEY)),storageBackend:demo?'local-json':'cloudbase-pg'}));return;}
   if(url.pathname.endsWith('/api/grades'))return service(req,res);
   if(demo&&(url.pathname==='/api/attachments'||url.pathname.startsWith('/api/attachments/')))return attachments(req,res);
+  if(demo&&url.pathname.startsWith('/api/grading/'))return grading(req,res);
+  if(demo&&url.pathname.startsWith('/api/mistakes/'))return mistakes(req,res);
   if(!demo){res.writeHead(404);res.end('Not found');return;}
+  const mathAsset=url.pathname.match(/^\/vendor\/katex\/(katex\.min\.(?:js|css)|contrib\/mhchem\.min\.js|fonts\/[A-Za-z0-9_-]+\.woff2)$/);
+  if(mathAsset){
+   try{const body=await fs.readFile(path.join(path.dirname(require.resolve('katex')),mathAsset[1]));res.writeHead(200,{'Content-Type':mathAsset[1].endsWith('.css')?'text/css':mathAsset[1].endsWith('.woff2')?'font/woff2':'text/javascript','X-Content-Type-Options':'nosniff','Cache-Control':'public, max-age=86400'});res.end(body);}catch{res.writeHead(404);res.end('Math asset unavailable; run npm ci');}return;
+  }
   const pdfAsset=url.pathname.match(/^\/vendor\/pdfjs\/(build\/(?:pdf|pdf\.worker)\.mjs|(?:cmaps|standard_fonts|wasm|iccs)\/[a-zA-Z0-9_-]+\.(?:bcmap|pfb|ttf|wasm|js|icc))$/);
   if(pdfAsset){
    try{const body=await fs.readFile(path.join(__dirname,'../node_modules/pdfjs-dist',pdfAsset[1]));const ext=path.extname(pdfAsset[1]);res.writeHead(200,{'Content-Type':['.mjs','.js'].includes(ext)?'text/javascript':ext==='.wasm'?'application/wasm':'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'public, max-age=86400'});res.end(body);}catch{res.writeHead(404);res.end('PDF asset unavailable; run npm ci');}return;
   }
-  const names={'/cloud.html':'cloud.html','/':'index.html','/app.js':'app.js','/seed.js':'seed.js','/core.js':'core.js','/learning-core.js':'learning-core.js','/learning.js':'learning.js','/ranking.js':'ranking.js','/style.css':'style.css','/profile.js':'profile.js','/shared.js':'shared.js','/attachments.js':'attachments.js','/favicon.svg':'favicon.svg'};
+  const names={'/cloud.html':'cloud.html','/':'index.html','/app.js':'app.js','/seed.js':'seed.js','/core.js':'core.js','/learning-core.js':'learning-core.js','/learning.js':'learning.js','/ranking.js':'ranking.js','/style.css':'style.css','/grading-tandix.mjs':'grading-tandix.mjs','/vendor/tandix/tandix.mjs':'vendor/tandix/tandix.mjs','/vendor/tandix/protocol.mjs':'vendor/tandix/protocol.mjs','/grading-core.js':'grading-core.js','/grading.js':'grading.js','/grading.css':'grading.css','/profile.js':'profile.js','/shared.js':'shared.js','/attachments.js':'attachments.js','/favicon.svg':'favicon.svg'};
+  names['/grading-pdf.mjs']='grading-pdf.mjs';names['/pdf-document.mjs']='pdf-document.mjs';
+  names['/grading-annotations.js']='grading-annotations.js';
+  names['/math-format.js']='math-format.js';names['/grading-math.mjs']='grading-math.mjs';
+  for(const file of ['mistakes.js','mistakes.css','mistake-crop.mjs','mistake-import.mjs','mistake-preparation.mjs'])names['/'+file]=file;
   const name=names[url.pathname];if(!name){res.writeHead(404);res.end();return;}
-  try{const body=await fs.readFile(path.join(__dirname,'../web',name));res.writeHead(200,{'Content-Type':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end(body);}catch{res.writeHead(500);res.end('Preview unavailable');}
+  try{const body=await fs.readFile(path.join(__dirname,'../web',name));res.writeHead(200,{'Content-Type':(name.endsWith('.js')||name.endsWith('.mjs'))?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end(body);}catch{res.writeHead(500);res.end('Preview unavailable');}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,demo?'127.0.0.1':'0.0.0.0',resolve);});
  console.log(demo?'本地成绩跟踪已启动：http://127.0.0.1:'+port:'JSON API listening on port 9000');

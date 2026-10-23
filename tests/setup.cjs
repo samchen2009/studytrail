@@ -36,8 +36,11 @@ async function run(){
   process.env.LOCAL_JSON_DEMO='1';process.env.TRIAL_PORT='0';process.env.TRIAL_DATA_DIR=folder;
   server=await require('../api/server').start();const base='http://127.0.0.1:'+server.address().port;
   const get=async()=>{const response=await fetch(base+'/api/grades');assert.equal(response.status,200);return response.json();};
+  const mistakeMeta=await fetch(base+'/api/mistakes/meta');assert.equal(mistakeMeta.status,200);assert.deepEqual((await mistakeMeta.json()).subjects,C.subjects);
   const initial=await get();assert.equal(initial.revision,0);assert.equal(initial.data,null);assert.equal(initial.instanceId,instances[0].id);
-  for(const file of ['/','/seed.js','/profile.js','/learning.js','/ranking.js','/vendor/pdfjs/build/pdf.mjs'])assert.equal((await fetch(base+file)).status,200,file);
+  for(const file of ['/','/seed.js','/profile.js','/learning.js','/ranking.js','/grading.js','/grading-core.js','/grading.css','/mistakes.css','/grading-tandix.mjs','/vendor/tandix/tandix.mjs','/vendor/tandix/protocol.mjs','/vendor/pdfjs/build/pdf.mjs'])assert.equal((await fetch(base+file)).status,200,file);
+  for(const file of ['/mistakes.js','/mistake-crop.mjs','/mistake-import.mjs','/grading-pdf.mjs','/pdf-document.mjs','/grading-annotations.js','/grading-math.mjs','/math-format.js','/vendor/katex/katex.min.js','/vendor/katex/contrib/mhchem.min.js']){const r=await fetch(base+file);assert.equal(r.status,200,file);assert.match(r.headers.get('content-type'),/javascript/);}
+  for(const file of ['/vendor/katex/katex.min.css','/vendor/katex/fonts/KaTeX_Main-Regular.woff2'])assert.equal((await fetch(base+file)).status,200,file);
   for(const file of ['/.data/instance.json','/.data/000000000001.json','/data/instance.json','/.git/config','/../data/instance.json','/.env'])assert.equal((await fetch(base+file)).status,404,file);
   const post=async(data,baseRevision)=>fetch(base+'/api/grades',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseRevision,requestId:crypto.randomUUID(),data})});
   assert.equal((await post(blank,0)).status,200);assert.deepEqual((await get()).data,blank);

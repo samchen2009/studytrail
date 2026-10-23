@@ -23,10 +23,18 @@ class AttachmentStore{
    const value=JSON.parse(await fs.readFile(path.join(this.directory,id,'meta.json'),'utf8'));
    if(value.id!==id||!extensions[path.extname(value.name).toLowerCase()]||/[\x00-\x1f\x7f/\\]/.test(value.name))throw Error('Invalid attachment metadata');
    try{const marker=await fs.stat(path.join(this.directory,id,'deleted'));value.deletedAt=marker.mtime.toISOString();}catch(error){if(error.code!=='ENOENT')throw error;}
+   const report=await this.report(id);
+   if(report){value.originalName=value.name;value.originalType=value.type;value.name=value.name.replace(/\.pdf$/i,'.html');value.type='text/html';value.size=(await fs.stat(path.join(this.directory,id,'html-report','index.html'))).size;value.report={sourceSha256:report.sourceSha256,questionCount:report.questions.length};}
    return value;
   }
   catch(error){if(error.code==='ENOENT')throw failure(404,'附件不存在。');throw error;}
  }
+ async report(id){
+  if(!UUID.test(id))throw failure(404,'附件不存在。');
+  const folder=path.join(this.directory,id,'html-report');
+  try{const active=JSON.parse(await fs.readFile(path.join(folder,'active.json'),'utf8'));const report=require('./attachment-html').validateReport(JSON.parse(await fs.readFile(path.join(folder,'manifest.json'),'utf8')),id);if(active.sourceSha256!==report.sourceSha256)throw Error('Report version mismatch');return report;}catch(error){if(error.code==='ENOENT')return null;throw error;}
+ }
+ async reportAsset(id,hash){if(!UUID.test(id)||!/^[a-f0-9]{64}$/.test(hash))throw failure(404,'题图不存在。');return fs.readFile(path.join(this.directory,id,'html-report','assets',hash+'.jpg'));}
  async list(examId,{includeDeleted=false}={}){
   await fs.mkdir(this.directory,{recursive:true});
   const entries=await fs.readdir(this.directory);
@@ -80,11 +88,19 @@ function createAttachmentService({store,grades,origins=[]}){
    if(req.headers.origin&&!allowed.has(req.headers.origin))throw failure(403,'此网站不在允许的来源中。');
    if(!['GET','POST','DELETE'].includes(req.method))throw failure(405,'不支持此请求方法。');
    const url=new URL(req.url,'http://localhost');
+   const reportAsset=url.pathname.match(/^\/api\/attachments\/([^/]+)\/report-assets\/([a-f0-9]{64})\.jpg$/);
+   if(reportAsset&&req.method==='GET'){const metadata=await store.metadata(reportAsset[1]);if(metadata.deletedAt||!metadata.report)throw failure(404,'解答不存在。');const report=await store.report(metadata.id),hash=reportAsset[2];if(!require('./attachment-html').reportAssets(report).some(a=>a.hash===hash))throw failure(404,'题图不存在。');const bytes=await store.reportAsset(metadata.id,hash);res.writeHead(200,{'Content-Type':'image/jpeg','Content-Length':bytes.length,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});res.end(bytes);return;}
    const match=url.pathname.match(/^\/api\/attachments\/([^/]+)\/content$/);
    if(match&&req.method!=='GET')throw failure(405,'不支持此请求方法。');
    if(match&&req.method==='GET'){
     const metadata=await store.metadata(match[1]);
     if(metadata.deletedAt)throw failure(404,'该附件已删除，可在已删除附件列表中恢复。');
+    if(metadata.report&&url.searchParams.get('original')!=='1'){
+     const {createAttachmentHtml,ONLINE_REPORT_CSP,REPORT_CSP}=require('./attachment-html'),offline=url.searchParams.get('download')==='1';
+     const html=await createAttachmentHtml(await store.report(metadata.id),{offline,loadAsset:a=>store.reportAsset(metadata.id,a.hash)});
+     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':offline?REPORT_CSP:ONLINE_REPORT_CSP,'Content-Disposition':(offline?'attachment':'inline')+'; filename="report.html"; filename*=UTF-8\'\''+encodeURIComponent(metadata.name).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16))});res.end(html);return;
+    }
+    if(metadata.report){metadata.name=metadata.originalName;metadata.type=metadata.originalType;}
     if(!Object.values(extensions).includes(metadata.type))throw failure(415,'附件格式无效。');
     const handle=await fs.open(path.join(store.directory,metadata.id,'file.bin'),'r');
     const stat=await handle.stat();

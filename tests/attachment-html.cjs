@@ -1,0 +1,70 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto'),http=require('node:http'),vm=require('node:vm'),sharp=require('sharp');
+const {AttachmentStore,createAttachmentService}=require('../api/attachments');
+const {MistakeStore,createMistakeService}=require('../api/mistakes');
+const {LocalJsonStore}=require('../api/store');
+const {createAttachmentHtml,validateReport}=require('../api/attachment-html');
+async function run(){
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'studytrail-report-'));let server;
+ try{
+  const grades=new LocalJsonStore(root),data=require('./fixtures/grades.cjs')(),examId=data.exams[0].id;
+  await grades.create({revision:1,requestId:'report-fixture',data});
+  const attachments=new AttachmentStore(path.join(root,'attachments')),id=crypto.randomUUID(),folder=path.join(attachments.directory,id),dir=path.join(folder,'html-report'),pdf=Buffer.from('%PDF-1.4\nsynthetic answer\n%%EOF');
+  await fs.mkdir(path.join(dir,'assets'),{recursive:true});
+  const meta={id,examId,subject:'数学',kind:'solution',name:'虚构解答.pdf',type:'application/pdf',size:pdf.length,createdAt:new Date().toISOString()};
+  await fs.writeFile(path.join(folder,'meta.json'),JSON.stringify(meta));await fs.writeFile(path.join(folder,'file.bin'),pdf);
+  const bytes=await sharp({create:{width:600,height:200,channels:3,background:'#ffffff'}}).jpeg().toBuffer(),hash=crypto.createHash('sha256').update(bytes).digest('hex');
+  const asset={hash,type:'image/jpeg',name:'虚构题目',width:600,height:200,size:bytes.length};
+  await fs.writeFile(path.join(dir,'assets',hash+'.jpg'),bytes);
+  const report={schemaVersion:1,id,sourceSha256:crypto.createHash('sha256').update(pdf).digest('hex'),title:'虚构 <script> 解答',subject:'数学',pageCount:1,questions:[{id:'q1',number:'1',title:'第 1 题',stem:'求 $x^2$。',answer:'$x^2=4$',images:[asset],content:[asset],printReady:false}],sections:[{pageNumber:1,title:'原版',text:'完整解答',image:asset}]};
+  validateReport(report,id);
+  assert.throws(()=>validateReport({...report,questions:[report.questions[0],report.questions[0]]},id));
+  await fs.writeFile(path.join(dir,'manifest.json'),JSON.stringify(report));
+  const offline=await createAttachmentHtml(report,{offline:true,loadAsset:async()=>bytes});await fs.writeFile(path.join(dir,'index.html'),offline);
+  assert.equal((await attachments.metadata(id)).type,'application/pdf','unpublished report leaves original default');
+  const {publish}=require('../scripts/publish-report-html.cjs');
+  await assert.rejects(()=>publish(root,[{id,expected:['1','2']}]),/coverage/);
+  assert.equal((await attachments.metadata(id)).type,'application/pdf');
+  const published=await publish(root,[{id,expected:['1']}]);assert.equal(published[0].questions,1);
+  const displayed=await attachments.metadata(id);assert.equal(displayed.name,'虚构解答.html');assert.equal(displayed.size,Buffer.byteLength(offline));
+  const store=new MistakeStore(path.join(root,'mistakes'),{attachments,grades});await store.init();
+  const attachmentService=createAttachmentService({store:attachments,grades,origins:['http://local.test']}),mistakeService=createMistakeService({store,origins:['http://local.test']});
+  server=http.createServer((req,res)=>req.url.startsWith('/api/mistakes/')?mistakeService(req,res):attachmentService(req,res));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port,url='/api/attachments/'+id;
+  let response=await fetch(base+url+'/content');assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/text\/html/);
+  const html=await response.text();assert.match(html,/data-question="q1"/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<title>.*<script>/);assert.match(html,/loading="lazy"/);
+  response=await fetch(base+url+'/report-assets/'+hash+'.jpg');assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes);
+  assert.equal((await fetch(base+url+'/report-assets/'+'0'.repeat(64)+'.jpg')).status,404);
+  response=await fetch(base+url+'/content?original=1');assert.equal(response.headers.get('content-type'),'application/pdf');assert.deepEqual(Buffer.from(await response.arrayBuffer()),pdf);
+  response=await fetch(base+url+'/content?download=1');assert.match(response.headers.get('content-disposition'),/^attachment;/);const downloaded=await response.text();assert.match(downloaded,/data:image\/jpeg;base64/);assert.doesNotMatch(downloaded,/src="\/api\//);assert.doesNotMatch(downloaded,/data-question=/);
+  // Exercise the real HTML button, including persistence and repeat clicks.
+  const button={dataset:{question:'q1'},nextElementSibling:{textContent:'',append(){}}};
+  const script=[...html.matchAll(/<script nonce="[^"]+">([\s\S]*?)<\/script>/g)][0][1];
+  vm.runInNewContext(script,{document:{querySelectorAll:selector=>selector==='[data-question]'?[button]:[],getElementById:()=>({}),createElement:()=>({})},addEventListener(){},fetch:(url,options)=>fetch(base+url,options)});
+  await button.onclick();assert.equal(button.textContent,'已加入错题本');assert.equal(store.rows.size,1);
+  const entry=[...store.rows.values()][0];assert.equal(entry.data.subject,'数学');assert.equal(entry.data.answer,'$x^2=4$');assert.equal(entry.data.assets.length,2);assert.equal(entry.data.printReady,false);
+  await button.onclick();assert.equal(store.rows.size,1);assert.equal((await store.get(entry.data.id)).revision,entry.revision);
+  const post=value=>fetch(base+'/api/mistakes/report-collect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({attachmentId:id,questionId:'q1',sourceSha256:report.sourceSha256,...value})});
+  assert.equal((await post({sourceSha256:'0'.repeat(64)})).status,409);assert.equal((await post({questionId:'missing'})).status,404);
+  report.questions[0].explanationTex=String.raw`\step{方法一}利用公式 $x^2=4$，所以 $x=\pm2$。`;
+  report.questions[0].answer='升级后的可复制解析';report.texSource={name:'synthetic.tex',sha256:report.sourceSha256};
+  await fs.writeFile(path.join(dir,'manifest.json'),JSON.stringify(report));
+  const native=await (await fetch(base+url+'/content')).text();assert.match(native,/class="tex-content"/);assert.match(native,/class="katex/);assert.match(native,/native-report/);
+  const repeat=await post({});assert.equal(repeat.status,200);assert.equal((await repeat.json()).data.id,entry.data.id);assert.equal(store.rows.size,1,'format/image upgrades never duplicate existing collection');
+  // Legacy collection reuses a prepared question automatically, excluding all original answers.
+  report.questions[0].printableQuestion={stem:'已知 $x=2$，求 $x^2$。',images:[],complete:true,confidence:.99,questionFormat:'text'};
+  await fs.writeFile(path.join(dir,'manifest.json'),JSON.stringify(report));
+  const preparedResponse=await fetch(base+'/api/mistakes/entries/'+entry.data.id+'/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(preparedResponse.status,200);
+  const prepared=(await preparedResponse.json()).entry;assert.equal(prepared.data.printReady,true);assert.equal(prepared.data.stem,report.questions[0].printableQuestion.stem);assert.equal(prepared.data.answer,entry.data.answer,'preparing the question does not overwrite its answer');assert.equal(prepared.data.assets.filter(a=>a.role==='question').length,0);assert.ok(prepared.data.assets.some(a=>a.role==='source'));
+  const paper=await store.createPaper({requestId:crypto.randomUUID(),subject:'数学',questions:[{id:prepared.data.id,revision:prepared.revision,points:null,space:'medium'}]});
+  const blank=await (await fetch(base+'/api/mistakes/papers/'+paper.data.id+'/print?kind=questions')).text();assert.match(blank,/已知/);assert.doesNotMatch(blank,/x\^2=4|参考答案|升级后的可复制解析|<figure><img/);
+  assert.equal((await store.preparePrintable(entry.data.id)).revision,prepared.revision,'prepared questions do not require a new model or version');
+  assert.equal((await (await fetch(base+'/api/mistakes/preparations')).json()).entries.length,0);
+  await attachments.setDeleted(id,true);assert.equal((await fetch(base+url+'/content')).status,404);assert.equal((await post({})).status,404);
+  assert.equal((await fetch(base+'/api/mistakes/assets/'+entry.data.assets[0].hash)).status,200,'collected copy survives deletion');
+  await attachments.setDeleted(id,false);assert.equal((await fetch(base+url+'/content')).status,200);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(folder,'meta.json'),'utf8')),meta);assert.deepEqual(await fs.readFile(path.join(folder,'file.bin')),pdf);assert.deepEqual((await grades.latest()).data,data);
+  console.log('PASS: historical HTML report publication, original PDF preservation, asset routing, real one-click collection, idempotency, offline download, version conflicts and deletion recovery.');
+ }finally{if(server)await new Promise(resolve=>server.close(resolve));await fs.rm(root,{recursive:true,force:true});}
+}
+run().catch(error=>{console.error(error);process.exitCode=1;});

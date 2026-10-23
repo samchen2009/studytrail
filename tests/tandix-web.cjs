@@ -1,0 +1,32 @@
+'use strict';
+const assert=require('node:assert/strict'),path=require('node:path'),{pathToFileURL}=require('node:url');
+async function run(){
+ const {TandixGrader,planFiles,buildPrompt}=await import(pathToFileURL(path.join(__dirname,'../web/grading-tandix.mjs')));
+ const {WEB_LIMITS}=await import(pathToFileURL(path.join(__dirname,'../web/vendor/tandix/protocol.mjs')));
+ const hello={product:'tandix',version:1,taskRecovery:1,authorized:false,origin:'http://127.0.0.1:8767',limits:WEB_LIMITS,mediaTypes:['image/jpeg','application/pdf'],backends:['codex'],resultFormats:['text','json']};
+ const bytes=Buffer.from([255,216,255,0,1,2,3]),asset={id:'page-fixture',sourceId:'source-fixture',role:'student',name:'student.jpg',type:'image/jpeg',size:bytes.length,pageNumber:1,width:600,height:800};
+ const job={id:'task-fixture',title:'虚构试卷',grade:'高一',subject:'数学',expectedMax:10,instructions:'按过程给分',files:[{...asset,id:'source-fixture',name:'source.pdf',type:'application/pdf',complete:true}],pages:[asset]};
+ const fetchAsset=async()=>({ok:true,blob:async()=>new Blob([bytes])});
+ const plan=planFiles(job,'pages',hello);assert.equal(plan[0].pages[0].id,asset.id);assert.equal(planFiles(job,'originals',hello)[0].asset.id,'source-fixture');
+ const prompt=buildPrompt(job,plan,'{"schemaVersion":"studytrail.grading-result/v1"}','详细解析');
+ assert.ok(prompt.includes('page-fixture'));assert.ok(prompt.includes('详细解析'));assert.ok(!/browser_(snapshot|click|type)/.test(prompt),'API prompts do not ask for unavailable browser tools');
+ assert.ok(prompt.includes('每道编号题 10 分'));assert.ok(prompt.includes('scoreBasis="estimated"'));assert.ok(prompt.includes('不得仅因卷面没写分值'));assert.ok(prompt.includes('生成 HTML 批改卷、详细解答与独立题图'),'new runs retain numeric scores and request the current export formats');
+ assert.ok(prompt.includes('KaTeX与mhchem'));assert.ok(prompt.includes('JSON字符串里的反斜杠'));
+ assert.ok(prompt.includes('evidence'));assert.ok(prompt.includes('未要求过程时不得'));assert.ok(prompt.includes('反变换回原图'),'scoring evidence and original-image coordinates are explicit');
+ assert.ok(prompt.includes('questionContent')&&prompt.includes('不能用作答锚点猜题框'));
+ assert.throws(()=>planFiles({...job,pages:Array(11).fill(asset)},'pages',hello),/最多/);
+ assert.throws(()=>planFiles({...job,pages:[{...asset,size:11*1024*1024}]},'pages',hello),/大小/);
+ assert.throws(()=>planFiles({...job,files:[{...job.files[0],complete:false}]},'pages',hello),/完整/);
+ assert.throws(()=>planFiles({...job,pages:[{...asset,size:26*1024*1024}]},'pages',hello),/合计/);
+ let authorization=false,called=0,filesRead=0;
+ const client={hello:async()=>hello,authorize:async()=>authorization,run:async()=>{called++;},close:()=>{}};
+ const id=crypto.randomUUID(),grader=new TandixGrader({Client:{discover:async()=>client}});
+ await assert.rejects(grader.run({taskId:id,job,contract:'{}',fetchAsset:async()=>{filesRead++;return fetchAsset();}}),{code:'authorization-required'});
+ assert.equal(filesRead,0);assert.equal(called,0,'denied permission sends no files');
+ for(const timeoutMs of [0,600001])await assert.rejects(grader.run({taskId:id,job,timeoutMs}),{code:'invalid-request'});
+ await assert.rejects(grader.run({job}),{code:'invalid-request'});
+ let receivedPrompt='';const customId=crypto.randomUUID();const fakeClient={hello:async()=>({...hello,authorized:true}),close(){},run:async options=>{receivedPrompt=options.prompt;return {id:customId,cursor:0,snapshot:{taskId:customId,backend:'codex',agentId:'synthetic-agent',sessionId:'synthetic-session',status:'completed',lastSeq:0},onProgress:()=>()=>{},result:async()=>({taskId:customId,data:{schemaVersion:'studytrail.mistake-extraction/v1',questions:[]}})};}};
+ const extraction=new TandixGrader({Client:{discover:async()=>fakeClient}});const extracted=await extraction.run({taskId:customId,job,prompt:'合成自动识题提示，不评分',fetchAsset});assert.equal(receivedPrompt,'合成自动识题提示，不评分');assert.equal(extracted.data.schemaVersion,'studytrail.mistake-extraction/v1');
+ console.log('PASS: attachment plans/limits, prompt contract, numeric reference scoring, evidence/coordinate instructions, authorization denial and stable-ID/timeout validation.');
+}
+run().catch(error=>{console.error(error);process.exitCode=1;});

@@ -8,12 +8,70 @@
 
 公开仓库：[samchen2009/studytrail](https://github.com/samchen2009/studytrail)。
 
+### 新电脑一键安装（macOS / Windows）
+
+无需预装 Node.js、Git 或 Homebrew。联网后复制对应命令运行，自动下载 **Node.js 24 LTS 独立运行时**、下载学迹、安装依赖，再下载安装并运行 **Tandix 官方安装向导**，完成后启动学迹。Node 下载包会对照 nodejs.org 的 SHA-256 清单校验。学迹和 Node 安装到当前用户目录，不修改系统 PATH 或已有 Node.js；Tandix 复用这个运行时，并按自己的流程准备扩展和伴随程序。
+
+**macOS（Apple Silicon / Intel）**：打开“终端”，粘贴：
+
+```sh
+/bin/bash -c 'installer_script=$(curl -fsSL https://raw.githubusercontent.com/samchen2009/studytrail/main/scripts/install.sh) && /bin/bash -c "$installer_script"'
+```
+
+**Windows 10 / 11（x64 / ARM64）**：打开 **PowerShell**，粘贴（系统自带的 Windows PowerShell 5.1 即可）：
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/samchen2009/studytrail/main/scripts/install.ps1')))
+```
+
+安装过程中请保持终端打开，跟随 Tandix 提示完成浏览器扩展加载和 Codex 登录。首次加载扩展需要在 Chrome 的 `chrome://extensions` 开启开发者模式，点击“加载已解压的扩展程序”，选择向导打印的目录（通常是 `~/.dsh/browser-extension`），再返回终端继续。
+
+- **Windows**：调用 [Tandix 官方 Windows 向导](https://github.com/samchen2009/tandix/blob/main/scripts/install/windows.ps1)，传入 `-Agents codex -Agent codex`。向导安装缺少的 Chrome、私有构建工具和 Codex CLI，注册伴随程序并检查 Codex 连接；浏览器安装或登录需要交互时按向导操作。当前批改文件接口使用 Codex，因此不额外准备 Cursor / WorkBuddy。
+- **macOS**：缺少 Chrome 时自动打开 Google 官方下载页，安装后回到终端继续；通过 Tandix 官方发现逻辑复用已有 Codex（包括桌面应用中的 CLI），没有时将官方 `@openai/codex` 安装到学迹目录的 `tools/`。检查登录，必要时启动 Codex 登录流程，再运行 [Tandix 官方 macOS 向导](https://github.com/samchen2009/tandix/blob/main/scripts/install/macos.sh)，构建扩展并注册伴随程序。首次模型调用仍需在批改页面验证。
+
+向导完成并启动学迹后，在 Chrome 打开 [http://127.0.0.1:8767/](http://127.0.0.1:8767/)，保持学迹终端运行，按 `Ctrl+C` 停止。Tandix 无需另开 `pnpm start` 常驻终端。
+
+| 系统 | 安装目录 | 下次启动 |
+| --- | --- | --- |
+| macOS | `~/Applications/StudyTrail/` | 双击目录内的 `Start StudyTrail.command` |
+| Windows | `%LOCALAPPDATA%\StudyTrail\` | 双击目录内的 `Start StudyTrail.cmd` |
+
+安装目录内 `app/` 保存程序、`runtime/` 保存专用 Node.js，**`data/` 保存个人档案、成绩及试卷附件**。完整备份时先停止服务，再复制整个 `data/`。一键安装的启动入口会明确传入这个数据目录；直接在 `app/` 运行 `npm start` 会使用下文手动安装的默认 `.data/`，请使用生成的启动入口保持档案一致。
+
+下文以手动安装的 `.data/` 举例说明存储结构；一键安装时，对应安装目录下的 `data/`。
+
+重复运行安装命令会复用学迹，**不自动升级学迹、不覆盖已有数据**。Tandix 官方向导成功后才写入 `.tandix-setup-v1` 标记，下次跳过这一步。目标目录存在其他文件或学迹安装不完整时会停止；可选择其他安装目录。学迹下载、校验或依赖安装失败时不发布半成品；若 Tandix 向导失败、取消或登录未完成，则返回失败、保留已安装的学迹与数据，不标记整套安装成功，也不自动启动学迹。重试同一命令会继续准备 Tandix。
+
+若安装被强制结束，且提示残留 `.install-lock`，请确认没有其他安装正在运行，再删除提示的锁文件 / 锁目录后重试。
+
+命令从两个项目的 GitHub `main` 分支下载并执行安装脚本，需能访问 GitHub、raw.githubusercontent.com、nodejs.org、npm registry，以及浏览器下载和 Codex 登录所需的官方服务。可先查看 [macOS 脚本](scripts/install.sh) 或 [Windows 脚本](scripts/install.ps1)。macOS 需满足 Node.js 24 和当前 Chrome 的运行要求；老系统请先升级系统。
+
+如需自定义目录或仅安装不立即启动，可下载对应脚本后执行：
+
+```sh
+# macOS
+/bin/bash ./install.sh --install-dir "$HOME/Applications/My StudyTrail" --no-start
+```
+
+```powershell
+# Windows，路径可含空格或中文
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -InstallDir "$env:LOCALAPPDATA\My StudyTrail" -NoStart
+```
+
+默认安装包含 Tandix 的下载安装流程。**首次扩展加载、账号登录及首次批改的站点授权仍由用户完成**，详见下文“试卷批改”。Codex 安装及登录命令依据 [OpenAI 官方 CLI 文档](https://learn.chatgpt.com/docs/codex/cli) 与 [登录命令说明](https://learn.chatgpt.com/docs/developer-commands?surface=cli#codex-login)。
+
+已完成安装后需更新或修复 Tandix，可结束正在运行的 Tandix 任务，再用保存的脚本运行 `--repair-tandix`（macOS）或 `-RepairTandix`（Windows）。此操作重新调用官方向导更新扩展和伴随程序，不升级学迹。安装目录被移动、伴随程序被删除或连接异常时也使用此选项；成功标记只表示向导曾完成，不代表浏览器当前仍已启用扩展或登录仍有效。
+
+仅需本地成绩功能时可显式传入 `--skip-tandix`（macOS）或 `-SkipTandix`（Windows）；此时提示 AI 批改尚未就绪。`--no-start` / `-NoStart` 只是不立即启动学迹，默认仍会运行 Tandix 交互向导。Tandix 的源码、扩展和配置保存在它自己的用户目录（如 `~/.dsh/`，Windows 另有 `%LOCALAPPDATA%\Tandix\` 日志和工具），不随学迹成绩 `data/` 备份；macOS 自动补装的 Codex CLI 位于学迹目录的 `tools/`。
+
+### 手动安装（含 Linux）
+
 1. 安装 Node.js **24 LTS**（也支持 Node.js 22.13 及以上版本），其中已包含 npm。
 2. 从 GitHub 下载项目 ZIP 并解压，或克隆仓库。
 3. 在项目目录打开终端，运行：
 
 ```sh
-npm ci --omit=optional
+npm ci --include=optional
 npm start
 ```
 
@@ -34,7 +92,7 @@ npm start -- --port 8768 --data-dir "./my-data"
 npm start -- --help
 ```
 
-默认数据目录是项目下的 `.data/`。相对路径按当前终端所在目录解析。也支持 `PORT` / `GRADES_DATA_DIR` 环境变量；命令行参数优先。本地启动不自动读取 `.env`。升级时保留 `.data/`，不要用全新解压目录覆盖自己的数据目录。
+手动安装默认数据目录是项目下的 `.data/`（一键安装入口使用安装目录内独立的 `data/`）。相对路径按当前终端所在目录解析。也支持 `PORT` / `GRADES_DATA_DIR` 环境变量；命令行参数优先。本地启动不自动读取 `.env`。升级时保留数据目录，不要用全新解压目录覆盖自己的数据目录。
 
 ## 数据保存与备份
 
@@ -99,6 +157,7 @@ npm run privacy:check
 | `api/instance.js` | 数据目录实例标识，用于隔离浏览器草稿 |
 | `api/attachments.js` | 本地附件接口与归档 |
 | `scripts/dev.cjs` | 跨平台启动入口 |
+| `scripts/install.sh`、`scripts/install.ps1` | macOS / Windows 首次安装及专用 Node.js 运行时 |
 | `scripts/data-directory.cjs` | 旧数据目录迁移，拒绝混合档案 |
 | `scripts/privacy-check.cjs` | 发布文件和 Git 历史隐私检查 |
 | `tests/`、`check.cjs` | 使用虚构数据的行为测试 |
@@ -109,3 +168,83 @@ npm run privacy:check
 旧 CloudBase 适配器保留供开发者自行配置，默认本地使用无需安装云 SDK。原先个人试验环境地址已从源码移除，`web/cloud.html` 现在跳转到本地首页。
 
 如自行开发部署，先运行 `npm run cloud:install`，再在服务端配置 `.env.example` 所列的环境 ID、私有桶、允许来源和编辑口令哈希，使用 `npm run cloud:start` 启动接口。云模式显式启用后数据会写入你配置的云服务；它不属于默认本地安装流程，附件也暂不提供云端适配。云适配器仅有模拟测试，尚未作为通用托管方案验证。
+
+## 试卷批改（Tandix Web API）
+
+从左侧“试卷批改”进入，上传学生作答图片 / PDF，可另外上传空白试卷与参考答案，填写科目、年级、可选满分和评分要求。每份本地任务最多 10 个原文件、30 张阅读页，单文件最多 20 MB，总量最多 160 MB。PDF 在本机转为阅读图片，原文件保留。
+
+本功能直接使用 [Tandix 网页调用接口 v1](https://github.com/samchen2009/tandix/blob/main/docs/web-api.md)，不需要复制任务、展开侧栏或手工回填结果：
+
+1. 使用 Chrome 116+ 或兼容 Edge，安装并启用新版 Tandix，更新本机伴随程序，在 Tandix 设置中选择并登录 **Codex**。v1 文件任务暂不支持 dsh / WorkBuddy。
+2. 在浏览器打开 StudyTrail 并上传试卷。页面会静默发现 Tandix；此步骤不申请授权、不启动模型、不发送档案。
+3. 选择“阅读图片”或“原文件”发送模式，点击“开始 AI 批改”。首次由 Tandix 自有授权页请求当前完整站点来源（包括端口）的授权；同意后继续提交，已授权站点可直接执行。
+4. 页面显示连接、上传、模型执行等进度，并支持取消。Tandix 最终返回 JSON 后，程序校验字段、评分细则、页码和图形，自动保存至本机，显示绿色勾、红色叉、逐题分数、详细解析、适用的多种解法、示意图和知识点总结。
+5. 原卷无完整逐题分值时，统一按每题 10 分估算，标明参考评分依据并显示折合成绩（如 8/10）。字迹不清或题干缺失仍保留待核。用户可填写人工复核依据。重新 AI 批改会替换当前题目及人工复核，旧版本保存在本地。
+
+Tandix v1 每次最多 **10 个附件、合计 25 MiB**，图片每份最多 10 MiB，任务最长 10 分钟。阅读图片模式每页算一个附件，适合手写和扫描试卷；页数超过 10 页时可选择原文件模式或拆卷。原 PDF 由 Codex 本地解析能力读取，扫描件 OCR 能力取决于实际环境。超限会在提交前报错，不会只发送部分页面，也不自动拆分成可能重复计分的多轮任务。
+
+已对接新版 Tandix 的可恢复任务接口（Web API v1 + taskRecovery=1，伴随程序协议 v2），需要同时更新扩展和本机伴随程序。提交前保存固定任务 ID；刷新或重新打开批改页后自动连接原任务，按进度游标补取遗漏事件和最终结果，不重新上传试卷、不重新批改。
+
+每轮时限可选 2 / 5 / 10 分钟（默认 10）。超时后保留原上下文，页面显示“继续原任务”；用户点击后在同一会话、同一工作目录和原附件上继续剩余工作。继续操作先保存幂等 ID，确认丢失时复用该 ID，防止重复发送。旧版临时任务无法自动迁移。
+
+执行记录与最终结果仅保存在 `.data/grading/<UUID>/ai-run/`。已收到的结果可本地恢复保存并生成HTML批改卷及解答；其他标签页更新过评分时保留JSON待核对，不直接覆盖。关闭网页只停止观察，明确点击取消才取消原任务。
+
+任务执行器仍在本机：电脑完全断网期间不保证模型继续计算，但持久任务、原会话和已保存结果可供恢复。接口、恢复流程与验证范围见 [Tandix 批改接入](docs/tandix-grading.md)。
+
+**点击开始后，本任务所选文件和提示词会交给 Tandix，并可能发送到 Codex 所用的模型服务。** StudyTrail 不发送其他成绩档案、DOM、Cookie 或登录凭据。Tandix 本机伴随程序会保存独立任务的工作副本，具体保存与清理方式见其文档；站点撤销授权不会追溯删除已发送内容。
+
+低于 80% 的识别置信度等情况会保留“待核”，显示成绩范围，不按零分处理。只有非参考答案页均已阅、上传完整、题目均已确认且分值一致时，才作为完整成绩展示；估算分始终标明参考评分。这无法自动检测模型漏掉的小问或错误解法，仍需核对题号、题数、分值及讲解。作文和开放题尤其需要复核。
+
+批改与人工复核后，默认生成**HTML 批改卷 + HTML 详细解答**。评分卷保留原图、绿勾红叉、逐题分数和总成绩；解答 HTML 包含题目与选项、作答对照、详细解析、评分依据、图示、知识点和原卷。两项分别保存与重试，某项导出失败不会重跑 AI，也不会阻止下载已成功的成果。
+
+批改和解答 HTML 可以直接打开或下载，文字可搜索、复制，支持题号导航和折叠解析。在线报告直接引用独立题图，每题提供“加入错题本”；下载的离线版将原图、KaTeX 样式和 WOFF2 字体嵌入同一个文件，断网或复制到另一台电脑后仍能阅读，无需在线 CDN。数学公式支持 `\(...\)`、`\[...\]`、`$...$`、`$$...$$`，化学方程式可在公式内使用 mhchem 的 `\ce{...}`；旧结果中的 Unicode 公式仍保留。AI 不提供原始 HTML 或脚本，普通文字先转义，公式由本机渲染。
+
+需要 PDF 时，点击“导出批改 PDF / 导出解答 PDF”，或在 HTML 内点击“打印 / 另存 PDF”。打印前自动展开解析及原卷，等待字体与图片加载，由浏览器保存 PDF。日常批改不再自动生成 PDF；已有 PDF 文件保留下载。原始 PDF 仍可上传和留档。
+
+已有任务可以直接打开 HTML，复用已保存结果，无需重新 AI 批改。每题图片在 `.data/grading/<任务ID>/question-assets/<SHA256>.jpg` 独立保存；`questions/<评分版本>-v1.json` 记录题号映射、来源页、裁切区域、方向、用途与完整性。所有题目都准备题图，不以已经加入错题本为前提。加入时复用已有图片和答案，在错题本保留独立副本，源任务删除不影响复习与组卷。
+
+评分/渲染版本用于隔离报告；旧 HTML 页面遇到评分变更会提示刷新，避免收错版本。旧题缺少精确题框时只能生成核对用截图，不能冒充无答案的练习题面；在错题本自动补齐后再打印。
+
+历史解答 PDF 支持迁移成逐题 HTML：题目截图独立保存在 `.data/attachments/<附件ID>/html-report/assets/<SHA256>.jpg`，`manifest.json` 保存题号、题图、解答片段、来源位置及原文件摘要。在线版每题可直接“加入错题本”，一次保存题图与解答，不要求用户重新截图或填写表单。找到对应 `.tex` 时优先读取源码，将段落、公式、表格及受支持的 LaTeX 图示转为 HTML、KaTeX 和 SVG，解题过程无需截图；原试卷照片及手写批注仍保留图片。未找到对应源码时保留原版解答图像、可搜索文字及完整原页。打印时有源码的报告使用网页正文，其他报告使用原页，避免重复打印题图。下载版嵌入图片、公式样式和字体，可离线阅读。
+
+题图按局部纸张底色校正阴影、亮度和对比度，不进行二值化，不改写文字或擦除作答；彩色插图保留原色。增强后的题图独立保存，原文件保留。新批改题图自动采用相同处理。历史报告可运行 `node scripts/upgrade-report-content.cjs --data-dir .data --config <本地配置.json>`，配置中的 `texPath` 指向已核对的对应源码；不提供时只增强题图。转换器不执行 TeX，遇到不支持的命令、缺图或公式错误会停止该报告转换，避免静默丢失内容。核对后再运行发布工具更新离线 HTML。
+
+迁移工具只处理明确指定的解答附件，拒绝试卷、答题卷及已删除附件。先用 `scripts/migrate-report-pdfs.py --data-dir .data --config <本地配置.json>` 提取（需要 Python、pypdfium2、Pillow），配置包含附件 ID、版式 `mode`、预期题号 `expected` 和题目结束页 `questionEndPage`；有共用材料或缺失题面时配置 `contexts`、`reuseQuestionImages` 或 `questionImageOverrides`。逐题核对后运行 `node scripts/publish-report-html.cjs --data-dir .data --config <本地配置.json>`，校验题号、原件及图像摘要后发布 HTML。配置和学生内容仅放在忽略目录。新格式或扫描 PDF 需先识题、确认题框，不自动套用不匹配的版式。
+
+发布后原附件入口显示 `.html`；原 `file.bin` 与 `meta.json` 不改写，原 PDF 可通过内容接口的 `?original=1` 读取。完整备份仍需复制整个 `.data/`，不能只复制 HTML 索引。
+
+选择一份批改任务后可点击“删除试卷”，确认后移入左侧“已删除试卷”；可随时恢复，原卷、批改结果、人工复核与 PDF 均保留。批改进行中不能删除当前任务。
+
+批改卷面查看器支持左右旋转 90°、恢复原方向、25%–400% 缩放、适合宽度、滚动查看和前后翻页，并提供打开 / 下载原文件入口。题号与分数保持正向，通过引线对应原卷位置；同一份 PDF 翻页保留方向与倍率，切换原文件时恢复默认。旋转仅影响当前查看，下载批改图片时会保留所选方向，不改动原文件或已有 PDF。
+
+可下载带勾叉的单页 JPEG，或导出离线 HTML 解答。JSON 导出不包含原文件，完整备份请复制整个 .data/grading/。Tandix SDK 已随代码提供，KaTeX 随 `npm ci` 安装，无需额外构建或下载在线公式资源。
+
+接入契约和验证范围见 [Tandix 批改接入](docs/tandix-grading.md)。
+
+标注改用页边题号卡片：绿勾表示全对，红叉表示错误，橙色三角表示部分得分，问号表示待核。AI 位置用虚线提示，人工校准用实线。在查看器中点击“校准标记位置”，选择题号，再点击该题的实际作答旁，即可保存正确位置；旋转状态下同样可校准。校准不会改动分数，PDF 需重新生成。新版批改要求每个评分点附实际作答证据和给扣分理由，旧结果需重新 AI 批改才能应用新规则。
+
+## 错题本
+
+侧栏按六科查看、搜索和筛选题目。默认流程由系统自动截题、填入学科与来源、归类并保存，不再要求逐项填表、手动截框和另行上传题图。
+
+- **批改中自动收集**：新任务默认开启自动收集。AI 同时返回干净题面的区域，本机服务在评分保存后自动截出题图、带入知识点与解答；待核评分与作文不自动入本。人工复核继续同步，原成绩不因整理错题改变。
+- **看到题目直接加入**：逐题解析点击“加入错题本”即保存；原卷阅读器点击“加入错题本”后只需选择题号。旧结果没有精确题框时自动保留附近原卷，再通过 Tandix 自动补齐题面，无需重新上传。手动主动加入不限于判错题。
+- **照片 / PDF 自动导入**：在当前学科点击“拍照 / 导入”，选择文件即可自动读取、拆题、截取图表、识别知识点和解答；多题时只需勾选要收录的题。在考试附件查看器点击“加入错题本”，直接使用当前文件或 PDF 当前页。图片会自动缩放，无需自行压缩。模型识别使用已有 Tandix / Codex 连接。 组卷整理可直接复用独立题图或已裁切的原题对照，不要求完整原页；旧记录缺图时从对应 HTML 附件恢复。对可清楚辨认、但带有手写批注的电路或曲线简图，可按原题给定信息重绘并独立保存；无法辨认的条件不猜测。
+- **自动处理未完成**：原文件、固定任务 ID 和结果留在本机，可从“导入记录”重新连接原任务、继续处理或选择已经识别的题目。正常流程不需要编辑表单；“文字录入”“修改”保留为可选方式。组卷时题面不完整可点“自动补齐题面”。
+- **选题打印**：勾选同科不同来源题目后，点击“生成试卷”即自动准备并生成只有题目及作答留白的空白卷。收录后在后台准备完整题干、选项和必要图表；已有可靠题面直接复用，旧题共享同一自动整理队列，组卷时自动等待并继续，无需逐题补齐或确认。已选题目及原任务会保留，失败后再次生成会继续处理；确实缺少原材料时说明原因。顺序、分值、标题和留白可在“组卷设置”中调整。答案解析单独输出，学生作答、答案、原批与来源截图不混入空白卷。
+
+已生成错题卷支持“编辑试卷”：修改标题、文字题干、题目顺序、分值与作答留白，移除题目或从同学科错题本添加题目。保存直接更新原试卷，预览、打印与下载使用最新版本；修改仅作用于本卷，原错题与旧版试卷文件保留。也可“另存副本”。“删除试卷”会移入“已删除”，可恢复，题目和图片不受影响。并发编辑会提示版本冲突，避免覆盖其他页面的修改。
+
+错题、任务、独立题图与固定试卷均保存在本地数据目录 `mistakes/`。成绩 JSON 导出不包含这些文件，完整备份需复制整个数据目录。首版不包含复习任务和订正状态。详见 [错题本方案与实施说明](docs/mistake-notebook-plan.md)。
+
+## 试卷批改与分析技能
+
+`skills/` 保存可复用流程，每个技能使用独立目录和 `SKILL.md`，便于后续增加其他科目。在本项目聊天中处理试卷时，按 [AGENTS.md](AGENTS.md) 读取相应技能；网页当前尚未自动加载技能文件。
+
+- [试卷批改](skills/exam-grading/SKILL.md)：先核实答案与作答证据，在原答卷上输出勾叉、逐题分数和总分，优先交付 HTML 批改卷（按需 PDF）；完整答卷中未作答或作答无法识别的评分点按0分处理并注明原因，保留可确认的正确步骤分；保存评分快照交给解析阶段。此新规则尚未接入网页评分逻辑。
+- [通用试卷解析](skills/exam-analysis/SKILL.md)：沿用评分，包含原题选项与图像、详细推导、多种适用解法、主观题红绿批注和知识技巧，默认交付离线解答 HTML，按需导出 PDF。
+- [英语考试分析与逐题详解](skills/english-exam-analysis/SKILL.md)：默认分析非听力部分，以得分表开篇，完整覆盖逐题解析与错题选项，在作文原卷上作红绿划线和编号批注，并结合本卷提供做题技巧，默认交付离线 HTML；用户指定 PDF 时遵从。
+
+两阶段 AI 拆分、PDF 与定位后续优化见 [评分与解析优化方案](docs/grading-pipeline-plan.md)。HTML 默认输出及公式渲染已实现；评分与长篇解析仍在同一次 AI 请求中执行，新技能文件尚未自动加载到网页任务。
+
+技能库只保存通用规范；本次考试材料、个人信息和生成报告继续保存在 Git 忽略的本地目录。

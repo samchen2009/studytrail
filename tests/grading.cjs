@@ -1,0 +1,107 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),http=require('node:http');
+const G=require('../web/grading-core'),{GradingStore,createGradingService}=require('../api/grading');
+function question(pageId,changes={}){return {id:'q1',number:'1',stem:'解方程 2x+3=7，并检验。',studentAnswer:'2x=4，x=2',answer:'x=2',maxScore:10,score:10,confidence:0.95,needsReview:false,reviewReason:'',feedback:'移项和求解正确。',regions:[{pageId,x:0.8,y:0.3}],rubric:[{criterion:'移项',maxScore:5,score:5},{criterion:'求解',maxScore:5,score:5}],methods:[{title:'等式性质',steps:['两边同时减 3，得到 2x=4。','两边除以 2，得到 x=2。','代回：2×2+3=7。']},{title:'逆运算',steps:['从 7 减去 3 后再除以 2，得 x=2。']}],knowledgePoints:['一元一次方程'],diagrams:[{title:'等式两边保持平衡',description:'两边同减相同的数。',shapes:[{type:'line',x1:50,y1:300,x2:550,y2:300,color:'blue'},{type:'text',x:180,y:250,text:'2x = 4',color:'ink'}]}],...changes};}
+const result=(pageId,q=question(pageId))=>({schemaVersion:G.SCHEMA,reviewedPageIds:[pageId],questions:[q],knowledgeSummary:[{topic:'等式性质',summary:'等式两边进行相同运算保持相等。',commonMistakes:['移项漏变号'],practice:['先写等式两边的相同操作']}],overallFeedback:'继续练习带括号的一元一次方程。'});
+async function run(){
+ const pages=[{id:'p1',role:'student'},{id:'ref',role:'reference'}];
+ const good=G.validateResult(result('p1'),pages),job={pages,files:[{complete:true}],result:good,reviews:{},expectedMax:10};
+ assert.equal(G.summarize(job).score,10);assert.equal(G.summarize(job).complete,true);
+ const low=G.validateResult(result('p1',question('p1',{confidence:0.6})),pages);assert.equal(low.questions[0].needsReview,true);assert.equal(G.summarize({...job,result:low}).score,0);
+ assert.equal(G.summarize({...job,expectedMax:20}).maxMismatch,true);assert.equal(G.summarize({...job,pages:[...pages,{id:'p2',role:'student'}]}).complete,false);
+ assert.equal(G.summarize({...job,files:[{complete:false}]}).complete,false);
+ assert.equal(G.questionState(good.questions[0],{score:null,maxScore:null}).maxScore,10);
+ assert.equal(G.summarize({...job,reviews:{q1:{score:6,maxScore:10}}}).partial,1);
+ for(const invalid of [result('ref'),result('missing'),result('p1',question('p1',{id:'__proto__'})),result('p1',question('p1',{score:11})),result('p1',question('p1',{rubric:[]})),result('p1',question('p1',{regions:[{pageId:'p1',x:2,y:0}]})),result('p1',question('p1',{diagrams:[{title:'unsafe',shapes:[{type:'script'}]}]}))])assert.throws(()=>G.validateResult(invalid,pages));
+ const duplicate=result('p1');duplicate.questions.push({...question('p1'),id:'q2'});assert.throws(()=>G.validateResult(duplicate,pages),/题号为空或重复/);
+ const unknown=G.validateResult(result('p1',question('p1',{score:null,maxScore:null,rubric:[]})),pages);assert.equal(G.summarize({...job,result:unknown}).unknownMax,1);
+ const estimated=G.validateResult(result('p1',question('p1',{score:8,scoreBasis:'estimated',scoringNote:'未标分值，求解 8 分、检验 2 分。',rubric:[{criterion:'求解',maxScore:8,score:8},{criterion:'检验',maxScore:2,score:0}]})),pages);
+ const estimateJob={...job,expectedMax:100,result:estimated};assert.equal(G.summarize(estimateJob).complete,true);assert.equal(G.summarize(estimateJob).maxMismatch,false);assert.equal(G.scoreReport(estimateJob).outOfTen,'8/10');assert.match(G.scoreReport(estimateJob).title,/估算/);assert.equal(G.scoreLabel(G.questionState(estimated.questions[0])),'8/10（估算）');
+ const legacyNull=result('p1',question('p1',{score:null,maxScore:null,rubric:[{criterion:'原卷未标分值',maxScore:null,score:null}]}));
+ assert.equal(G.validateResult(legacyNull,pages).questions[0].rubric[0].score,null,'old null-valued rubrics remain recoverable');
+ const legacySummary=G.scoreReport({...job,result:G.validateResult(legacyNull,pages)});assert.equal(legacySummary.value,'0–10/10');assert.equal(legacySummary.complete,false,'unknown old scores are shown as a range, never fabricated');
+ const pendingEstimate=G.scoreReport({...estimateJob,result:G.validateResult({...estimated,questions:[{...estimated.questions[0],confidence:0.5}]},pages)});assert.equal(pendingEstimate.pending,1);assert.equal(pendingEstimate.value,'0–10/10');
+ for(const rotation of [0,90,180,270]){const point={x:0.23,y:0.71},rotated=G.rotatePoint(point,rotation),back=G.unrotatePoint(rotated,rotation);assert.ok(Math.abs(back.x-point.x)<1e-12&&Math.abs(back.y-point.y)<1e-12);}
+ assert.deepEqual(G.rotatePoint({x:0.2,y:0.3},90),{x:0.7,y:0.2});
+ const denseJob={...job,result:{...good,questions:Array.from({length:30},(_,i)=>({...good.questions[0],id:'dense-'+i,number:String(i+1),regions:[{pageId:'p1',x:0.2,y:0.5}]}))}};
+ for(const rotation of [0,90,180,270]){const layout=G.annotationLayout(denseJob,pages[0],rotation,600,850);for(let i=0;i<layout.items.length;i++){const item=layout.items[i];assert.ok(item.labelY>=0&&item.labelY+layout.labelHeight<=layout.height);if(i)assert.ok(item.labelY>=layout.items[i-1].labelY+layout.labelHeight+8);assert.equal(item.labelX,612);}assert.equal(layout.items[0].state.status,'correct');}
+ assert.equal(G.statusStyle.partial.mark,'△');assert.notEqual(G.statusStyle.partial.color,G.statusStyle.incorrect.color,'partial credit is not a red cross');
+ const folder=await fs.mkdtemp(path.join(os.tmpdir(),'studytrail-grading-'));let store=new GradingStore(folder);
+ const server=http.createServer((req,res)=>createGradingService({store,origins:['http://local.test']})(req,res));
+ try{
+  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});const base='http://127.0.0.1:'+server.address().port+'/api/grading';
+  const api=async(route,{method='GET',body,origin='http://local.test',headers={}}={})=>{const r=await fetch(base+route,{method,headers:{Origin:origin,...(body!==undefined?{'Content-Type':'application/json'}:{}),...headers},...(body!==undefined?{body:JSON.stringify(body)}:{})});return {status:r.status,value:await r.json()};};
+  const create=()=>api('/jobs',{method:'POST',body:{title:'虚构试卷',subject:'数学',grade:'高一',expectedMax:10}});
+  assert.equal((await api('/jobs',{origin:'https://other.test'})).status,403);
+  let r=await create();assert.equal(r.status,201);let current=r.value;const id=current.data.id;
+  const png=Buffer.from([137,80,78,71,13,10,26,10,0,0,0,0]);
+  const upload=async(params,bytes=png,revision=current.revision)=>{const response=await fetch(base+'/jobs/'+id+'/assets?'+new URLSearchParams(params),{method:'POST',headers:{Origin:'http://local.test','X-Base-Revision':String(revision)},body:bytes});return {status:response.status,value:await response.json()};};
+  assert.equal((await upload({kind:'original',role:'student',name:'../bad.png'})).status,422);
+  assert.equal((await upload({kind:'original',role:'student',name:'fake.png'},Buffer.from('<script>bad</script>'))).status,415);
+  r=await upload({kind:'original',role:'student',name:'虚构试卷.png'});assert.equal(r.status,201);current=r.value;const original=current.data.files[0];
+  assert.equal((await upload({kind:'page',role:'student',name:'page.png',sourceId:'missing',pageNumber:1})).status,422);
+  r=await upload({kind:'page',role:'student',name:'page.png',sourceId:original.id,pageNumber:1});assert.equal(r.status,201);current=r.value;const page=current.data.pages[0];
+  assert.equal((await api('/jobs/'+id+'/complete',{method:'POST',body:{baseRevision:current.revision,sourceId:original.id,pageCount:2}})).status,422);
+  r=await api('/jobs/'+id+'/complete',{method:'POST',body:{baseRevision:current.revision,sourceId:original.id,pageCount:1}});assert.equal(r.status,200);current=r.value;
+  const content=await fetch(base+'/jobs/'+id+'/files/'+original.id);assert.equal(content.status,200);assert.deepEqual(Buffer.from(await content.arrayBuffer()),png);
+  const posting=()=>api('/jobs/'+id+'/result',{method:'POST',body:{baseRevision:current.revision,result:result(page.id)}});
+  const writes=await Promise.all([posting(),posting()]);assert.deepEqual(writes.map(w=>w.status).sort(),[200,409]);current=writes.find(w=>w.status===200).value;
+  assert.equal(G.summarize(current.data).complete,true);
+  const exportStatus=()=>api('/jobs/'+id+'/exports');
+  assert.deepEqual((await exportStatus()).value.files,{marked:false,answers:false,'answers-html':false,'marked-html':false});
+  const pdfBytes=Buffer.from('%PDF-1.4\nsynthetic test only\n%%EOF\n');
+  const exportPdf=async(kind,revision=current.revision,bytes=pdfBytes,origin='http://local.test')=>fetch(base+'/jobs/'+id+'/exports/'+kind,{method:'POST',headers:{Origin:origin,'Content-Type':'application/pdf','X-Base-Revision':String(revision)},body:bytes});
+  assert.equal((await exportPdf('marked',current.revision,Buffer.from('bad'))).status,415);
+  assert.equal((await exportPdf('marked',current.revision,pdfBytes,'https://other.test')).status,403);
+  assert.equal((await exportPdf('marked',current.revision-1)).status,409);
+  assert.equal((await exportPdf('../bad')).status,404);
+  for(const kind of ['marked','answers']){assert.equal((await exportPdf(kind)).status,201);const response=await fetch(base+'/jobs/'+id+'/exports/'+kind);assert.equal(response.headers.get('content-type'),'application/pdf');assert.match(response.headers.get('content-disposition'),/^attachment;/);assert.deepEqual(Buffer.from(await response.arrayBuffer()),pdfBytes);}
+  assert.deepEqual((await exportStatus()).value.files,{marked:true,answers:true,'answers-html':false,'marked-html':false});
+  assert.equal((await upload({kind:'original',role:'student',name:'more.png'})).status,409);
+  r=await api('/jobs/'+id+'/review',{method:'POST',body:{baseRevision:current.revision,questionId:'q1',score:6,maxScore:10,note:'人工复核：缺少检验，扣 4 分。',studentAnswer:'2x=4，x=2'}});assert.equal(r.status,200);current=r.value;
+  assert.equal(G.summarize(current.data).score,6);assert.equal(G.summarize(current.data).partial,1);
+  assert.deepEqual((await exportStatus()).value.files,{marked:false,answers:false,'answers-html':false,'marked-html':false},'manual review invalidates prior PDFs without deleting them');
+  assert.equal((await fetch(base+'/jobs/'+id+'/exports/marked')).status,404);
+  r=await api('/jobs/'+id+'/review',{method:'POST',body:{baseRevision:current.revision,questionId:'q1',score:20,maxScore:10,note:'错误给分',studentAnswer:''}});assert.equal(r.status,422);
+  store=new GradingStore(folder);r=await api('/jobs/'+id);assert.deepEqual(r.value,current,'grading records, manual review and attachments persist across restart');
+  const previous=await fs.readFile(path.join(folder,id,'000000000001.json'),'utf8');assert.equal(JSON.parse(previous).data.result,null,'immutable first version');
+  r=await posting();assert.equal(r.status,200);current=r.value;assert.equal(current.data.reviews.q1,undefined,'new AI result explicitly replaces that question review');
+  const replacement=result(page.id,{...question(page.id),id:'q-new',number:'新题组1'});
+  r=await api('/jobs/'+id+'/result',{method:'POST',body:{baseRevision:current.revision,mode:'replace',result:replacement}});assert.equal(r.status,200);current=r.value;assert.equal(current.data.result.questions.length,1);assert.equal(current.data.result.questions[0].id,'q-new','full AI runs replace prior questions rather than merge stale grades');assert.deepEqual(current.data.reviews,{});
+  assert.equal((await api('/jobs')).value.jobs.length,1);
+  assert.equal((await api('/jobs/../../config')).status,404);
+  assert.equal((await api('/jobs/'+id+'/files/invalid')).status,404);
+  // Soft deletion is versioned; originals, reviews, results and existing PDFs survive restoration.
+  const qid=current.data.result.questions[0].id,unchangedScore=G.summarize(current.data).score;
+  const position=(changes={})=>api('/jobs/'+id+'/positions',{method:'POST',body:{baseRevision:current.revision,questionId:qid,regionIndex:0,position:{pageId:page.id,x:0.2,y:0.3},...changes}});
+  assert.equal((await position({baseRevision:current.revision-1})).status,409);
+  for(const changes of [{regionIndex:99},{position:{pageId:page.id,x:1.1,y:0.3}},{position:{pageId:'other-page',x:0.2,y:0.3}}])assert.equal((await position(changes)).status,422);
+  r=await position();assert.equal(r.status,200);current=r.value;assert.equal(G.pageMarks(current.data,page)[0].confirmed,true);assert.equal(G.pageMarks(current.data,page)[0].r.x,0.2);assert.equal(G.summarize(current.data).score,unchangedScore,'calibration never changes the score');
+  r=await position({reset:true});assert.equal(r.status,200);current=r.value;assert.equal(G.pageMarks(current.data,page)[0].confirmed,false);
+  r=await position();assert.equal(r.status,200);current=r.value;
+  for(const kind of ['marked','answers'])assert.equal((await exportPdf(kind)).status,201);
+  const beforeDelete=structuredClone(current),pdfRevision=current.data.scoreRevision??current.revision;
+  const deleteJob=(revision=current.revision,origin='http://local.test')=>api('/jobs/'+id,{method:'DELETE',body:{baseRevision:revision},origin});
+  assert.equal((await deleteJob(current.revision,'https://other.test')).status,403);
+  assert.equal((await deleteJob(current.revision-1)).status,409);
+  r=await deleteJob();assert.equal(r.status,200);current=r.value;assert.ok(current.data.deletedAt);assert.equal(current.data.scoreRevision,pdfRevision);
+  const listing=(await api('/jobs')).value;assert.equal(listing.jobs.length,0);assert.equal(listing.deletedJobs.length,1);assert.equal(listing.deletedJobs[0].revision,current.revision);
+  assert.equal((await store.list()).length,0);assert.equal((await store.list({includeDeleted:true})).length,1);
+  for(const route of ['/jobs/'+id,'/jobs/'+id+'/files/'+original.id,'/jobs/'+id+'/exports','/jobs/'+id+'/exports/marked'])assert.equal((await fetch(base+route)).status,404,'deleted task hidden: '+route);
+  assert.equal((await posting()).status,404,'late AI results cannot update deleted jobs');
+  assert.equal((await upload({kind:'original',role:'student',name:'more.png'})).status,404);
+  assert.equal((await api('/jobs/'+id+'/restore',{method:'POST',body:{baseRevision:beforeDelete.revision}})).status,409);
+  store=new GradingStore(folder);assert.equal((await api('/jobs')).value.deletedJobs.length,1,'trash persists across restart');
+  r=await api('/jobs/'+id+'/restore',{method:'POST',body:{baseRevision:current.revision}});assert.equal(r.status,200);current=r.value;
+  assert.equal(current.data.deletedAt,undefined);assert.deepEqual(current.data.result,beforeDelete.data.result);assert.deepEqual(current.data.reviews,beforeDelete.data.reviews);assert.deepEqual(current.data.files,beforeDelete.data.files);assert.deepEqual(current.data.pages,beforeDelete.data.pages);
+  assert.deepEqual(current.data.regionOverrides,beforeDelete.data.regionOverrides,'calibration survives restart and restore');
+  assert.deepEqual(Buffer.from(await (await fetch(base+'/jobs/'+id+'/files/'+original.id)).arrayBuffer()),png);
+  assert.deepEqual((await exportStatus()).value.files,{marked:true,answers:true,'answers-html':false,'marked-html':false},'PDFs available immediately after restore, without regeneration');
+  for(const kind of ['marked','answers'])assert.deepEqual(Buffer.from(await (await fetch(base+'/jobs/'+id+'/exports/'+kind)).arrayBuffer()),pdfBytes);
+  assert.deepEqual(await fs.readFile(path.join(folder,id,'exports',pdfRevision+'-annotations-v2-marked.pdf')),pdfBytes,'deleted/restored PDFs remain unchanged on disk');
+  assert.equal((await api('/jobs')).value.jobs.length,1);assert.equal((await api('/jobs')).value.deletedJobs.length,0);
+  console.log('PASS: grading uploads, source validation, page completeness, detailed multi-method results, safe diagrams, confidence gating, deterministic totals, manual review, merge, restart history, parallel/stale-write conflicts and cross-origin rejection.');
+  console.log('PASS: versioned soft delete, trash, restore after restart, stale/cross-origin rejection, late-write blocking and byte-for-byte preservation of files/results/PDFs.');
+ }finally{await new Promise(resolve=>server.close(resolve));await fs.rm(folder,{recursive:true,force:true});}
+}
+run().catch(error=>{console.error(error);process.exitCode=1;});

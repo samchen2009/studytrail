@@ -9,13 +9,15 @@
   "scripts": {
     "dev": "node scripts/dev.cjs",
     "start": "node scripts/dev.cjs",
-    "test": "node check.cjs && node tests/attachments.cjs && node tests/learning.cjs && node tests/ranking.cjs && node tests/setup.cjs && node tests/privacy.cjs",
+    "test": "node check.cjs && node tests/attachments.cjs && node tests/learning.cjs && node tests/ranking.cjs && node tests/setup.cjs && node tests/privacy.cjs && node tests/grading.cjs && node tests/grading-runs.cjs && node tests/tandix-web.cjs && node tests/tandix-retry.cjs && node tests/pdf-document.cjs && node tests/grading-html.cjs && node tests/mistakes.cjs && node tests/mistake-papers.cjs && node tests/navigation.cjs && node tests/mistake-imports.cjs && node tests/mistake-preparation.cjs && node tests/html-workflow.cjs && node tests/attachment-html.cjs && node tests/tex-content.cjs",
     "cloud:install": "npm ci --prefix api --ignore-scripts",
     "cloud:start": "node api/server.js",
     "privacy:check": "node scripts/privacy-check.cjs",
     "prepublishOnly": "npm run privacy:check"
   },
   "dependencies": {
-    "pdfjs-dist": "6.4.299"
+    "katex": "0.19.0",
+    "pdfjs-dist": "6.4.299",
+    "sharp": "0.35.5"
   }
 }
